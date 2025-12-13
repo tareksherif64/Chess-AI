@@ -22,7 +22,7 @@ CHECK_COLOR = (255, 0, 0, 100)
 LEGAL_MOVE_COLOR = (0, 255, 0, 150)
 
 
-def draw_board(screen, board: chess.Board, selected_square=None, last_move=None, in_check=False, game_over=False, legal_moves=None, check_flash_timer=0, game_over_fade=0):
+def draw_board(screen, board: chess.Board, selected_square=None, last_move=None, in_check=False, game_over=False, legal_moves=None, check_flash_timer=0, game_over_fade=0, animating_move=None, animation_progress=0.0):
     for rank in range(8):
         for file in range(8):
             color = LIGHT if (rank + file) % 2 == 0 else DARK
@@ -68,6 +68,12 @@ def draw_board(screen, board: chess.Board, selected_square=None, last_move=None,
     for square in chess.SQUARES:
         piece = board.piece_at(square)
         if piece:
+            # Skip if animating and this is the moving piece's start square
+            if animating_move and square == animating_move.from_square:
+                continue
+            # Skip if animating capture and this is the destination square
+            if animating_move and square == animating_move.to_square and board.is_capture(animating_move):
+                continue
             symbol = piece.symbol()
             rank = 7 - chess.square_rank(square)
             file = chess.square_file(square)
@@ -88,6 +94,34 @@ def draw_board(screen, board: chess.Board, selected_square=None, last_move=None,
             text = FONT.render(PIECE_SYMBOLS[symbol], True, piece_color)
             text_rect = text.get_rect(center=rect.center)
             screen.blit(text, text_rect)
+
+    # Draw animating piece
+    if animating_move:
+        piece = board.piece_at(animating_move.from_square)
+        if piece:
+            symbol = piece.symbol()
+            from_rank = 7 - chess.square_rank(animating_move.from_square)
+            from_file = chess.square_file(animating_move.from_square)
+            to_rank = 7 - chess.square_rank(animating_move.to_square)
+            to_file = chess.square_file(animating_move.to_square)
+            current_file = from_file + (to_file - from_file) * animation_progress
+            current_rank = from_rank + (to_rank - from_rank) * animation_progress
+            center_x = current_file * SQ_SIZE + SQ_SIZE // 2
+            center_y = current_rank * SQ_SIZE + SQ_SIZE // 2
+            # Piece color
+            if piece.color == chess.WHITE:
+                piece_color = (200, 200, 200)
+                outline_color = (0, 0, 0)
+            else:
+                piece_color = (50, 50, 50)
+                outline_color = (255, 255, 255)
+            # Draw outline
+            text = FONT.render(PIECE_SYMBOLS[symbol], True, outline_color)
+            for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1)]:
+                screen.blit(text, (center_x - text.get_width()//2 + dx, center_y - text.get_height()//2 + dy))
+            # Draw main text
+            text = FONT.render(PIECE_SYMBOLS[symbol], True, piece_color)
+            screen.blit(text, (center_x - text.get_width()//2, center_y - text.get_height()//2))
 
     # Overlays
     if in_check and not game_over:
@@ -130,6 +164,8 @@ def run_gui():
     legal_moves = None
     check_flash_timer = 0
     game_over_fade = 0
+    animating_move = None
+    animation_progress = 0.0
     running = True
 
     while running:
@@ -141,6 +177,19 @@ def run_gui():
             check_flash_timer = 0
         if board.is_game_over() and game_over_fade < 255:
             game_over_fade += 5  # Fade speed
+        if animating_move:
+            animation_progress += 0.05  # Animation speed
+            if animation_progress >= 1.0:
+                board.push(animating_move)
+                last_move = animating_move
+                animating_move = None
+                animation_progress = 0.0
+                # Bot move after player animation
+                if not board.is_game_over() and not board.turn:  # After white move, turn is black
+                    bot_move = choose_move(board, depth=3)
+                    if bot_move:
+                        animating_move = bot_move
+                        animation_progress = 0.0
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -154,9 +203,11 @@ def run_gui():
                     legal_moves = None
                     check_flash_timer = 0
                     game_over_fade = 0
+                    animating_move = None
+                    animation_progress = 0.0
 
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if not board.is_game_over() and board.turn:  # your side = White
+                if not board.is_game_over() and not animating_move:
                     sq = square_from_mouse(event.pos)
                     if sq is not None:
                         if selected_square is None:
@@ -168,23 +219,16 @@ def run_gui():
                             # second click: try move
                             move = chess.Move(selected_square, sq)
                             if move in board.legal_moves:
-                                board.push(move)
-                                last_move = move
+                                animating_move = move
+                                animation_progress = 0.0
                                 selected_square = None
                                 legal_moves = None
-
-                                # bot move
-                                if not board.is_game_over():
-                                    bot_move = choose_move(board, depth=3)
-                                    if bot_move:
-                                        board.push(bot_move)
-                                        last_move = bot_move
                             else:
                                 # reset selection if illegal
                                 selected_square = None
                                 legal_moves = None
 
-        draw_board(screen, board, selected_square, last_move, board.is_check(), board.is_game_over(), legal_moves, check_flash_timer, game_over_fade)
+        draw_board(screen, board, selected_square, last_move, board.is_check(), board.is_game_over(), legal_moves, check_flash_timer, game_over_fade, animating_move, animation_progress)
         pygame.display.flip()
 
     pygame.quit()
