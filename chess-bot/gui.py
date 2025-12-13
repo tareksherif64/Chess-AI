@@ -1,6 +1,7 @@
 import pygame
 import chess
 from engine import choose_move
+import threading
 
 WIDTH, HEIGHT = 640, 640
 SQ_SIZE = WIDTH // 8
@@ -20,6 +21,14 @@ SELECTED_COLOR = (255, 255, 0, 100)
 LAST_MOVE_COLOR = (255, 255, 0, 50)
 CHECK_COLOR = (255, 0, 0, 100)
 LEGAL_MOVE_COLOR = (0, 255, 0, 150)
+
+# Threading variables
+bot_move_result = None
+bot_thread = None
+
+def compute_bot_move(board, depth):
+    global bot_move_result
+    bot_move_result = choose_move(board, depth)
 
 
 def draw_board(screen, board: chess.Board, selected_square=None, last_move=None, in_check=False, game_over=False, legal_moves=None, check_flash_timer=0, game_over_fade=0, animating_move=None, animation_progress=0.0):
@@ -154,6 +163,7 @@ def square_from_mouse(pos):
     return None
 
 def run_gui():
+    global bot_thread, bot_move_result
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Chess AI")
     clock = pygame.time.Clock()
@@ -186,10 +196,15 @@ def run_gui():
                 animation_progress = 0.0
                 # Bot move after player animation
                 if not board.is_game_over() and not board.turn:  # After white move, turn is black
-                    bot_move = choose_move(board, depth=3)
-                    if bot_move:
-                        animating_move = bot_move
-                        animation_progress = 0.0
+                    bot_move_result = None
+                    bot_thread = threading.Thread(target=compute_bot_move, args=(board.copy(), 3))
+                    bot_thread.start()
+        # Check if bot thread is done
+        if bot_thread and not bot_thread.is_alive():
+            if bot_move_result:
+                animating_move = bot_move_result
+                animation_progress = 0.0
+            bot_thread = None
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -205,6 +220,9 @@ def run_gui():
                     game_over_fade = 0
                     animating_move = None
                     animation_progress = 0.0
+                    if bot_thread:
+                        bot_thread.join()  # Wait for thread to finish
+                    bot_thread = None
 
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if not board.is_game_over() and not animating_move:
