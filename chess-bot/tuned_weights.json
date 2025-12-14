@@ -1,1 +1,19 @@
-{"bishop_pair": 0, "mobility": 0, "center_control": 0, "development": 0, "castling": 0, "isolated_pawn": 0, "doubled_pawn": 50, "passed_pawn": 50, "rook_open_file": 0, "rook_7th": 0, "pawn_shield": 80, "king_open_file": 80, "tempo": 0}
+{
+    "bishop_pair": 50,
+    "mobility": 5,
+    "center_control": 10,
+    "development": 20,
+    "castling": 30,
+    "isolated_pawn": 20,
+    "doubled_pawn": 88,
+    "passed_pawn": 32,
+    "backward_pawn": 15,
+    "rook_open_file": 25,
+    "rook_7th": 40,
+    "rook_connected": 20,
+    "pawn_shield": 93,
+    "king_open_file": 100,
+    "king_attack": 30,
+    "tempo": 10,
+    "contempt": 50
+}
