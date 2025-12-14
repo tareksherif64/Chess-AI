@@ -1,6 +1,20 @@
 import chess
 import math
 
+transposition_table = {}
+
+# Opening book: FEN to UCI move
+opening_book = {
+    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1': 'e2e4',  # 1. e4
+    'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1': 'e7e5',  # 1... e5
+    'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2': 'g1f3',  # 2. Nf3
+    'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2': 'b8c6',  # 2... Nc6
+    'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3': 'f1c4',  # 3. Bc4 (Italian)
+    'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 2 3': 'g8f6',  # 3... Nf6 (Russian)
+    'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3': 'f1b5',  # 3. Bb5 (Spanish)
+    # Add more as needed
+}
+
 PIECE_VALUES = {
     chess.PAWN: 100,
     chess.KNIGHT: 300,
@@ -86,10 +100,33 @@ PIECE_TABLES = {
     chess.KING: KING_TABLE,
 }
 
-transposition_table = {}
+# Tunable evaluation weights
+WEIGHTS = {
+    'bishop_pair': 30,
+    'mobility': 1,
+    'center_control': 10,
+    'development': 10,
+    'castling': 20,
+    'isolated_pawn': 10,
+    'doubled_pawn': 10,
+    'passed_pawn': 20,
+    'rook_open_file': 10,
+    'rook_7th': 15,
+    'pawn_shield': 5,
+    'king_open_file': 10,
+    'tempo': 10,
+}
+
+# Load tuned weights if available
+try:
+    import json
+    with open('tuned_weights.json', 'r') as f:
+        WEIGHTS = json.load(f)
+except FileNotFoundError:
+    pass
 
 def evaluate(board: chess.Board) -> int:
-    """Enhanced evaluation with material and position."""
+    """Enhanced evaluation with material, position, pawn structure, mobility, and more."""
     if board.is_checkmate():
         return -math.inf if board.turn else math.inf
     if board.is_stalemate() or board.is_insufficient_material():
@@ -101,6 +138,14 @@ def evaluate(board: chess.Board) -> int:
         score += len(board.pieces(piece_type, chess.WHITE)) * PIECE_VALUES[piece_type]
         score -= len(board.pieces(piece_type, chess.BLACK)) * PIECE_VALUES[piece_type]
 
+    # Bishop pair bonus
+    white_bishops = len(board.pieces(chess.BISHOP, chess.WHITE))
+    black_bishops = len(board.pieces(chess.BISHOP, chess.BLACK))
+    if white_bishops >= 2:
+        score += WEIGHTS['bishop_pair']
+    if black_bishops >= 2:
+        score -= WEIGHTS['bishop_pair']
+
     # Position
     for square in chess.SQUARES:
         piece = board.piece_at(square)
@@ -110,6 +155,47 @@ def evaluate(board: chess.Board) -> int:
                 score += table[square]
             else:
                 score -= table[63 - square]  # Flip for black
+
+    # Mobility
+    white_mobility = len(list(board.legal_moves)) if board.turn == chess.WHITE else 0
+    board.push(chess.Move.null())
+    black_mobility = len(list(board.legal_moves)) if board.turn == chess.BLACK else 0
+    board.pop()
+    score += WEIGHTS['mobility'] * (white_mobility - black_mobility)
+
+    # Center control (squares d4, e4, d5, e5)
+    center_squares = [chess.D4, chess.E4, chess.D5, chess.E5]
+    for sq in center_squares:
+        piece = board.piece_at(sq)
+        if piece:
+            if piece.color == chess.WHITE:
+                score += WEIGHTS['center_control']
+            else:
+                score -= WEIGHTS['center_control']
+
+    # Development (knights and bishops out of starting positions)
+    for color in [chess.WHITE, chess.BLACK]:
+        sign = 1 if color == chess.WHITE else -1
+        # Knights
+        knights = board.pieces(chess.KNIGHT, color)
+        for knight_sq in knights:
+            if color == chess.WHITE and knight_sq in [chess.B1, chess.G1]:
+                score -= WEIGHTS['development'] * sign
+            elif color == chess.BLACK and knight_sq in [chess.B8, chess.G8]:
+                score -= WEIGHTS['development'] * sign
+        # Bishops
+        bishops = board.pieces(chess.BISHOP, color)
+        for bishop_sq in bishops:
+            if color == chess.WHITE and bishop_sq in [chess.C1, chess.F1]:
+                score -= WEIGHTS['development'] * sign
+            elif color == chess.BLACK and bishop_sq in [chess.C8, chess.F8]:
+                score -= WEIGHTS['development'] * sign
+
+    # Castling bonus
+    if board.has_castling_rights(chess.WHITE):
+        score += WEIGHTS['castling']
+    if board.has_castling_rights(chess.BLACK):
+        score -= WEIGHTS['castling']
 
     # Pawn structure
     for color in [chess.WHITE, chess.BLACK]:
@@ -124,7 +210,7 @@ def evaluate(board: chess.Board) -> int:
                     isolated = False
                     break
             if isolated:
-                score -= 10 if color == chess.WHITE else -10
+                score -= WEIGHTS['isolated_pawn'] if color == chess.WHITE else -WEIGHTS['isolated_pawn']
             # Doubled pawn
             doubled = False
             for r in range(8):
@@ -132,7 +218,7 @@ def evaluate(board: chess.Board) -> int:
                     doubled = True
                     break
             if doubled:
-                score -= 10 if color == chess.WHITE else -10
+                score -= WEIGHTS['doubled_pawn'] if color == chess.WHITE else -WEIGHTS['doubled_pawn']
             # Passed pawn
             passed = True
             direction = 1 if color == chess.WHITE else -1
@@ -146,13 +232,14 @@ def evaluate(board: chess.Board) -> int:
                 if not passed:
                     break
             if passed:
-                score += 20 if color == chess.WHITE else -20
+                score += WEIGHTS['passed_pawn'] if color == chess.WHITE else -WEIGHTS['passed_pawn']
 
-    # Rooks on open files
+    # Rooks on open files and 7th rank
     for color in [chess.WHITE, chess.BLACK]:
         rooks = board.pieces(chess.ROOK, color)
         for rook_sq in rooks:
             file = chess.square_file(rook_sq)
+            rank = chess.square_rank(rook_sq)
             open_file = True
             for r in range(8):
                 piece = board.piece_at(chess.square(file, r))
@@ -160,21 +247,42 @@ def evaluate(board: chess.Board) -> int:
                     open_file = False
                     break
             if open_file:
-                score += 10 if color == chess.WHITE else -10
+                score += WEIGHTS['rook_open_file'] if color == chess.WHITE else -WEIGHTS['rook_open_file']
+            # Rook on 7th rank
+            if (color == chess.WHITE and rank == 6) or (color == chess.BLACK and rank == 1):
+                score += WEIGHTS['rook_7th'] if color == chess.WHITE else -WEIGHTS['rook_7th']
 
-    # Simple king safety
+    # King safety
     for color in [chess.WHITE, chess.BLACK]:
         king_sq = board.king(color)
         if king_sq:
             file = chess.square_file(king_sq)
-            open_file = True
-            for r in range(8):
-                piece = board.piece_at(chess.square(file, r))
-                if piece and piece.piece_type == chess.PAWN:
-                    open_file = False
-                    break
-            if open_file:
-                score -= 20 if color == chess.WHITE else 20  # Penalty for king on open file
+            rank = chess.square_rank(king_sq)
+            sign = 1 if color == chess.WHITE else -1
+            # Pawn shield
+            shield_squares = []
+            if color == chess.WHITE:
+                if rank >= 1:
+                    shield_squares.extend([chess.square(file-1, rank-1), chess.square(file, rank-1), chess.square(file+1, rank-1)])
+            else:
+                if rank <= 6:
+                    shield_squares.extend([chess.square(file-1, rank+1), chess.square(file, rank+1), chess.square(file+1, rank+1)])
+            shield_count = sum(1 for sq in shield_squares if 0 <= chess.square_file(sq) < 8 and board.piece_at(sq) == chess.Piece(chess.PAWN, color))
+            score += shield_count * WEIGHTS['pawn_shield'] * sign
+            # Open file near king
+            for f in [file-1, file, file+1]:
+                if 0 <= f < 8:
+                    open_near = True
+                    for r in range(8):
+                        piece = board.piece_at(chess.square(f, r))
+                        if piece and piece.piece_type == chess.PAWN:
+                            open_near = False
+                            break
+                    if open_near:
+                        score -= WEIGHTS['king_open_file'] * sign
+
+    # Tempo bonus
+    score += WEIGHTS['tempo'] if board.turn == chess.WHITE else -WEIGHTS['tempo']
 
     return score
 
@@ -200,6 +308,7 @@ def quiescence(board: chess.Board, alpha: int, beta: int, depth: int = 0) -> int
     return alpha
 
 def minimax(board: chess.Board, depth: int, alpha: int, beta: int, maximizing: bool):
+    global transposition_table
     key = board.fen()
     if key in transposition_table and transposition_table[key][0] >= depth:
         return transposition_table[key][1], transposition_table[key][2]
@@ -223,7 +332,7 @@ def minimax(board: chess.Board, depth: int, alpha: int, beta: int, maximizing: b
             return beta, None
 
     best_move = None
-    moves = sorted(board.legal_moves, key=lambda m: board.is_capture(m), reverse=True)  # Move ordering
+    moves = sorted(board.legal_moves, key=lambda m: (board.is_capture(m), board.is_check(), 0), reverse=True)  # Better move ordering
     if maximizing:
         max_eval = -math.inf
         for move in moves:
@@ -254,10 +363,25 @@ def minimax(board: chess.Board, depth: int, alpha: int, beta: int, maximizing: b
         return min_eval, best_move
 
 def choose_move(board: chess.Board, depth: int = 4) -> chess.Move:
-    """Iterative deepening search."""
+    """Iterative deepening search with aspiration windows and opening book."""
+    # Check opening book
+    fen = board.fen()
+    if fen in opening_book:
+        return chess.Move.from_uci(opening_book[fen])
+    
     best_move = None
+    prev_score = 0
     for d in range(1, depth + 1):
-        _, move = minimax(board, d, -math.inf, math.inf, board.turn)
-        if move:
-            best_move = move
+        alpha = prev_score - 50
+        beta = prev_score + 50
+        while True:
+            score, move = minimax(board, d, alpha, beta, board.turn)
+            if alpha < score < beta:
+                best_move = move
+                prev_score = score
+                break
+            elif score <= alpha:
+                alpha = score - 50
+            else:
+                beta = score + 50
     return best_move

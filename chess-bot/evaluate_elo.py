@@ -31,11 +31,11 @@ def play_game(white_player, black_player, time_limit=chess.engine.Limit(time=0.1
 
 def evaluate_elo(num_games=10):
     # Our engine as white
-    our_engine = lambda board: choose_move(board, depth=3)
+    our_engine = lambda board: choose_move(board, depth=4)
 
-    # Stockfish with time limit to simulate ~1000 ELO (adjust for strength)
+    # Stockfish with time limit to simulate ~1200 ELO (adjust for strength)
     stockfish = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
-    stockfish.configure({"Skill Level": 3})  # Lower skill for ~1000 ELO
+    stockfish.configure({"Skill Level": 1})  # Lower skill for ~1200 ELO
 
     wins = 0
     losses = 0
@@ -78,5 +78,8 @@ def evaluate_elo(num_games=10):
     print(f"Estimated ELO: {estimated_elo:.0f}")
 
 if __name__ == "__main__":
-    import math
-    evaluate_elo(10)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--games', type=int, default=10, help='Number of games to play')
+    args = parser.parse_args()
+    evaluate_elo(args.games)
