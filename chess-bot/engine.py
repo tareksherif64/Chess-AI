@@ -260,18 +260,26 @@ def evaluate(board: chess.Board) -> int:
             rank = chess.square_rank(king_sq)
             sign = 1 if color == chess.WHITE else -1
             # Pawn shield
-            shield_squares = []
-            if color == chess.WHITE:
-                if rank >= 1:
-                    shield_squares.extend([chess.square(file-1, rank-1), chess.square(file, rank-1), chess.square(file+1, rank-1)])
-            else:
-                if rank <= 6:
-                    shield_squares.extend([chess.square(file-1, rank+1), chess.square(file, rank+1), chess.square(file+1, rank+1)])
-            shield_count = sum(1 for sq in shield_squares if 0 <= chess.square_file(sq) < 8 and board.piece_at(sq) == chess.Piece(chess.PAWN, color))
-            score += shield_count * WEIGHTS['pawn_shield'] * sign
-            # Open file near king
-            for f in [file-1, file, file+1]:
+                    # Pawn shield (only add squares that are actually on board)
+        shield_squares = []
+        if color == chess.WHITE and rank >= 1:
+            for f in (file - 1, file, file + 1):
                 if 0 <= f < 8:
+                    shield_squares.append(chess.square(f, rank - 1))
+        elif color == chess.BLACK and rank <= 6:
+            for f in (file - 1, file, file + 1):
+                if 0 <= f < 8:
+                    shield_squares.append(chess.square(f, rank + 1))
+
+        shield_count = sum(
+            1
+            for sq in shield_squares
+            if board.piece_at(sq) == chess.Piece(chess.PAWN, color)
+        )
+
+        score += shield_count * WEIGHTS['pawn_shield'] * sign
+        # Open file near king            for f in [file-1, file, file+1]:
+        if 0 <= f < 8:
                     open_near = True
                     for r in range(8):
                         piece = board.piece_at(chess.square(f, r))
