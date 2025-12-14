@@ -2,17 +2,43 @@ import chess
 import math
 
 transposition_table = {}
+killer_moves = {}  # Depth -> list of killer moves
+history_moves = {}  # (from_square, to_square) -> count
 
-# Opening book: FEN to UCI move
+# Opening book: FEN to UCI move - Famous openings
 opening_book = {
-    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1': 'e2e4',  # 1. e4
-    'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1': 'e7e5',  # 1... e5
-    'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2': 'g1f3',  # 2. Nf3
-    'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2': 'b8c6',  # 2... Nc6
-    'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3': 'f1c4',  # 3. Bc4 (Italian)
-    'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 2 3': 'g8f6',  # 3... Nf6 (Russian)
-    'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3': 'f1b5',  # 3. Bb5 (Spanish)
-    # Add more as needed
+    # Italian Game
+    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1': 'e2e4',
+    'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1': 'e7e5',
+    'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2': 'g1f3',
+    'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2': 'b8c6',
+    'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3': 'f1c4',
+    'rnbqkb1r/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 0 4': 'f8c5',
+    
+    # Spanish Opening (Ruy Lopez)
+    'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3': 'f1b5',
+    'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 2 3': 'g8f6',
+    
+    # Sicilian Defense
+    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1': 'e2e4',
+    'rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2': 'g1f3',
+    'rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2': 'd7d6',
+    
+    # French Defense
+    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1': 'e2e4',
+    'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1': 'e7e6',
+    'rnbqkbnr/pppppppp/4p3/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2': 'd2d4',
+    
+    # Caro-Kann Defense
+    'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1': 'c7c6',
+    'rnbqkbnr/pp1ppppp/2p5/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2': 'd2d4',
+    
+    # Slav Defense
+    'rnbqkbnr/pp1ppppp/2p5/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 2': 'd7d5',
+    
+    # Queen's Gambit
+    'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1': 'd2d4',
+    'rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1': 'd7d5',
 }
 
 PIECE_VALUES = {
@@ -153,26 +179,23 @@ def is_endgame(board: chess.Board) -> bool:
 
 
 def evaluate_basic_mates(board: chess.Board) -> int:
-    """Recognize and handle basic mating patterns - only when already winning."""
+    """Recognize and handle famous endgame patterns."""
     pieces = board.piece_map()
     white_pieces = [p for p in pieces.values() if p.color == chess.WHITE]
     black_pieces = [p for p in pieces.values() if p.color == chess.BLACK]
     
-    # Only apply mate patterns when we have heavy material advantage
     white_material = sum(PIECE_VALUES.get(p.piece_type, 0) for p in white_pieces)
     black_material = sum(PIECE_VALUES.get(p.piece_type, 0) for p in black_pieces)
-    
     material_diff = white_material - black_material
     
-    # King + Queen vs King
+    # K+Q vs K: Chase enemy king to edge and corner
     if material_diff > 800 and len(white_pieces) == 2 and any(p.piece_type == chess.QUEEN for p in white_pieces):
         black_king_sq = board.king(chess.BLACK)
         if black_king_sq:
-            # Push enemy king to corner (modest bonus)
             file = chess.square_file(black_king_sq)
             rank = chess.square_rank(black_king_sq)
             edge_distance = min(file, 7-file, rank, 7-rank)
-            return 5000 + (3 - edge_distance) * 100
+            return 5000 + (3 - edge_distance) * 200
     
     if material_diff < -800 and len(black_pieces) == 2 and any(p.piece_type == chess.QUEEN for p in black_pieces):
         white_king_sq = board.king(chess.WHITE)
@@ -180,7 +203,55 @@ def evaluate_basic_mates(board: chess.Board) -> int:
             file = chess.square_file(white_king_sq)
             rank = chess.square_rank(white_king_sq)
             edge_distance = min(file, 7-file, rank, 7-rank)
-            return -5000 - (3 - edge_distance) * 100
+            return -5000 - (3 - edge_distance) * 200
+    
+    # K+R vs K: Drive to edge
+    if material_diff > 400 and len(white_pieces) == 2 and any(p.piece_type == chess.ROOK for p in white_pieces):
+        black_king_sq = board.king(chess.BLACK)
+        white_king_sq = board.king(chess.WHITE)
+        if black_king_sq and white_king_sq:
+            # Rook and king vs king: push enemy king away and centralize own king
+            bk_file = chess.square_file(black_king_sq)
+            bk_rank = chess.square_rank(black_king_sq)
+            wk_file = chess.square_file(white_king_sq)
+            wk_rank = chess.square_rank(white_king_sq)
+            
+            # Bonus for driving black king to edge
+            edge_bonus = (7 - min(bk_file, 7-bk_file, bk_rank, 7-bk_rank)) * 100
+            # Bonus for centralizing white king
+            center_bonus = (7 - abs(wk_file - 3.5) - abs(wk_rank - 3.5)) * 50
+            return 5000 + edge_bonus + center_bonus
+    
+    if material_diff < -400 and len(black_pieces) == 2 and any(p.piece_type == chess.ROOK for p in black_pieces):
+        white_king_sq = board.king(chess.WHITE)
+        black_king_sq = board.king(chess.BLACK)
+        if white_king_sq and black_king_sq:
+            wk_file = chess.square_file(white_king_sq)
+            wk_rank = chess.square_rank(white_king_sq)
+            bk_file = chess.square_file(black_king_sq)
+            bk_rank = chess.square_rank(black_king_sq)
+            
+            edge_bonus = (7 - min(wk_file, 7-wk_file, wk_rank, 7-wk_rank)) * 100
+            center_bonus = (7 - abs(bk_file - 3.5) - abs(bk_rank - 3.5)) * 50
+            return -5000 - edge_bonus - center_bonus
+    
+    # K+B vs K: Can't mate, but try to maintain advantage
+    # K+N vs K: Can't mate, but try to maintain advantage
+    # K+P vs K: Advance pawn and push enemy king away
+    if len(white_pieces) <= 3:
+        white_pawns = len([p for p in white_pieces if p.piece_type == chess.PAWN])
+        if white_pawns > 0:
+            # Bonus for advancing pawns
+            for pawn_sq in board.pieces(chess.PAWN, chess.WHITE):
+                rank = chess.square_rank(pawn_sq)
+                return 1000 + rank * 100
+    
+    if len(black_pieces) <= 3:
+        black_pawns = len([p for p in black_pieces if p.piece_type == chess.PAWN])
+        if black_pawns > 0:
+            for pawn_sq in board.pieces(chess.PAWN, chess.BLACK):
+                rank = chess.square_rank(pawn_sq)
+                return -1000 - (7 - rank) * 100
     
     return 0
 
@@ -440,32 +511,50 @@ def quiescence(board: chess.Board, alpha: int, beta: int, depth: int = 0) -> int
     return alpha
 
 def minimax(board: chess.Board, depth: int, alpha: int, beta: int, maximizing: bool, position_history=None):
-    global transposition_table
+    global transposition_table, killer_moves, history_moves
     if position_history is None:
         position_history = []
     
     key = board.fen()
+    
+    # Only use transposition table for score cutoffs, NOT for move selection
     if key in transposition_table and transposition_table[key][0] >= depth:
-        return transposition_table[key][1], transposition_table[key][2]
-
+        return transposition_table[key][1], None  # Return None for move to force new search
+    
     if depth == 0 or board.is_game_over():
         score = quiescence(board, alpha, beta) if not board.is_game_over() else evaluate(board, position_history)
         transposition_table[key] = (depth, score, None)
         return score, None
 
-    # Move ordering: prioritize captures and promotions (simple)
+    # Move ordering: MVV/LVA + History + Killers
     def move_score(move):
         score = 0
+        # Killer moves (moves that caused cutoffs at this depth)
+        if depth in killer_moves and move in killer_moves[depth]:
+            score += 400
+        
+        # History moves (frequently good moves)
+        move_key = (move.from_square, move.to_square)
+        if move_key in history_moves:
+            score += history_moves[move_key]
+        
         # Promotions
         if move.promotion:
             score += 500
-        # Captures
+        
+        # Captures: MVV/LVA (Most Valuable Victim, Least Valuable Attacker)
         if board.is_capture(move):
-            score += 100
+            victim = board.piece_at(move.to_square)
+            attacker = board.piece_at(move.from_square)
+            victim_value = PIECE_VALUES.get(victim.piece_type, 0) if victim else 0
+            attacker_value = PIECE_VALUES.get(attacker.piece_type, 0) if attacker else 0
+            score += 100 + (victim_value - attacker_value) // 10
+        
         return score
 
     moves = sorted(board.legal_moves, key=move_score, reverse=True)
     best_move = None
+    original_alpha = alpha
     
     # Track position for this branch
     current_pos = board.fen().split(' ')[0]
@@ -491,8 +580,16 @@ def minimax(board: chess.Board, depth: int, alpha: int, beta: int, maximizing: b
                 best_move = move
             alpha = max(alpha, eval_score)
             if beta <= alpha:
+                # Record killer move and update history
+                if depth not in killer_moves:
+                    killer_moves[depth] = []
+                if move not in killer_moves[depth]:
+                    killer_moves[depth].append(move)
+                move_key = (move.from_square, move.to_square)
+                history_moves[move_key] = history_moves.get(move_key, 0) + depth * depth
                 break
-        transposition_table[key] = (depth, max_eval, best_move)
+        
+        transposition_table[key] = (depth, max_eval, None)  # Don't store moves in TT
         return max_eval, best_move
     else:
         min_eval = math.inf
@@ -513,8 +610,16 @@ def minimax(board: chess.Board, depth: int, alpha: int, beta: int, maximizing: b
                 best_move = move
             beta = min(beta, eval_score)
             if beta <= alpha:
+                # Record killer move and update history
+                if depth not in killer_moves:
+                    killer_moves[depth] = []
+                if move not in killer_moves[depth]:
+                    killer_moves[depth].append(move)
+                move_key = (move.from_square, move.to_square)
+                history_moves[move_key] = history_moves.get(move_key, 0) + depth * depth
                 break
-        transposition_table[key] = (depth, min_eval, best_move)
+        
+        transposition_table[key] = (depth, min_eval, None)  # Don't store moves in TT
         return min_eval, best_move
 
 # def choose_move(board: chess.Board, depth: int = 3) -> chess.Move:
@@ -542,7 +647,17 @@ def minimax(board: chess.Board, depth: int, alpha: int, beta: int, maximizing: b
 #     return best_move
 
 def choose_move(board: chess.Board, depth: int = 3) -> chess.Move:
-    """Iterative deepening search with repetition avoidance."""
+    """Iterative deepening search with killer moves and history heuristic."""
+    global killer_moves, transposition_table
+    
+    # Clear old killer moves (keep only current search depth)
+    if len(killer_moves) > 100:
+        killer_moves.clear()
+    
+    # Clear transposition table periodically to avoid memory bloat
+    if len(transposition_table) > 50000:
+        transposition_table.clear()
+    
     # Check opening book
     fen = board.fen()
     if fen in opening_book:

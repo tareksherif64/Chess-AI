@@ -6,7 +6,7 @@ import time
 # Path to Stockfish executable (download from https://stockfishchess.org/)
 STOCKFISH_PATH = r"C:\Users\Tarek\Desktop\Personal Projects\Chess AI\Chess-AI\stockfish\stockfish-windows-x86-64-avx2.exe"
 
-def play_game(white_player, black_player, time_limit=chess.engine.Limit(time=0.1)):
+def play_game(white_player, black_player, game_num=0, time_limit=chess.engine.Limit(time=0.1)):
     board = chess.Board()
     moves = []
     while not board.is_game_over():
@@ -27,6 +27,21 @@ def play_game(white_player, black_player, time_limit=chess.engine.Limit(time=0.1
             moves.append(move)
         else:
             break
+    
+    # Print move history for debugging
+    print(f"\nGame {game_num} Move History:")
+    move_str = " ".join([m.uci() for m in moves])
+    print(move_str)
+    
+    # Check for oscillating moves (same square moved back and forth)
+    if len(moves) > 2:
+        oscillations = 0
+        for i in range(len(moves) - 2):
+            if moves[i].from_square == moves[i+2].to_square and moves[i].to_square == moves[i+2].from_square:
+                oscillations += 1
+        if oscillations > 0:
+            print(f"⚠️  WARNING: {oscillations} oscillating move pairs detected!")
+    
     return board.result(), moves
 
 def evaluate_elo(num_games=10):
@@ -42,14 +57,14 @@ def evaluate_elo(num_games=10):
     draws = 0
 
     for i in range(num_games):
-        print(f"Playing game {i+1}...")
+        print(f"\n{'='*60}\nPlaying game {i+1}...")
         # Alternate colors
         if i % 2 == 0:
             # Our engine white
-            result, _ = play_game(our_engine, lambda b: stockfish.play(b, chess.engine.Limit(time=0.1)).move)
+            result, moves = play_game(our_engine, lambda b: stockfish.play(b, chess.engine.Limit(time=0.1)).move, i+1)
         else:
             # Our engine black
-            result, _ = play_game(lambda b: stockfish.play(b, chess.engine.Limit(time=0.1)).move, our_engine)
+            result, moves = play_game(lambda b: stockfish.play(b, chess.engine.Limit(time=0.1)).move, our_engine, i+1)
 
         if result == "1-0":
             if i % 2 == 0:
