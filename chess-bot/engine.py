@@ -1,6 +1,17 @@
 import chess
 import math
 
+# Tunable search parameters (can be optimized)
+NULL_MOVE_R = 3
+RAZOR_MARGIN_MULT = 300
+FUTILITY_MARGIN_MULT = 150
+LMR_THRESHOLD = 4
+LMR_THRESHOLD_DEEP = 8
+LMR_REDUCTION_1 = 1
+LMR_REDUCTION_2 = 2
+ASPIRATION_WINDOW = 50
+LATE_MOVE_PRUNING_BASE = 3
+
 transposition_table = {}
 killer_moves = {}  # Depth -> list of killer moves
 history_moves = {}  # (from_square, to_square) -> count
@@ -824,7 +835,7 @@ def pvs_search(board: chess.Board, depth: int, alpha: int, beta: int, position_h
                         and board.piece_at(sq).color == board.turn for sq in chess.SQUARES)
         if has_pieces:
             board.push(chess.Move.null())
-            null_score, _ = pvs_search(board, depth - 3, -beta, -beta + 1, position_history, False)
+            null_score, _ = pvs_search(board, depth - NULL_MOVE_R, -beta, -beta + 1, position_history, False)
             null_score = -null_score
             board.pop()
             if null_score >= beta:
@@ -833,7 +844,7 @@ def pvs_search(board: chess.Board, depth: int, alpha: int, beta: int, position_h
     # Razoring: if position is hopeless and depth is low, reduce search
     if not in_check and depth <= 3:
         eval_score = evaluate(board, position_history)
-        razor_margin = 300 * depth
+        razor_margin = RAZOR_MARGIN_MULT * depth
         if eval_score + razor_margin < alpha:
             # Try quiescence to see if we can improve
             q_score = quiescence(board, alpha - razor_margin, alpha - razor_margin + 1)
@@ -845,7 +856,7 @@ def pvs_search(board: chess.Board, depth: int, alpha: int, beta: int, position_h
     futility_margin = 0
     if not in_check and depth <= 3:
         eval_score = evaluate(board, position_history)
-        futility_margin = 150 * depth
+        futility_margin = FUTILITY_MARGIN_MULT * depth
         if eval_score + futility_margin <= alpha:
             futility_pruning = True
     
@@ -882,7 +893,7 @@ def pvs_search(board: chess.Board, depth: int, alpha: int, beta: int, position_h
             continue
         
         # Late move pruning: at low depth, prune moves late in the list
-        if not in_check and depth <= 3 and i >= (3 + depth * depth):
+        if not in_check and depth <= 3 and i >= (LATE_MOVE_PRUNING_BASE + depth * depth):
             if not board.is_capture(move) and not move.promotion:
                 continue
         
@@ -895,10 +906,10 @@ def pvs_search(board: chess.Board, depth: int, alpha: int, beta: int, position_h
         else:
             # Late Move Reduction (LMR): reduce depth for later moves
             reduction = 0
-            if depth >= 3 and i >= 4 and not board.is_capture(move) and not move.promotion and not in_check:
-                reduction = 1
-                if i >= 8:
-                    reduction = 2
+            if depth >= 3 and i >= LMR_THRESHOLD and not board.is_capture(move) and not move.promotion and not in_check:
+                reduction = LMR_REDUCTION_1
+                if i >= LMR_THRESHOLD_DEEP:
+                    reduction = LMR_REDUCTION_2
             
             # Null window search for remaining moves
             score, _ = pvs_search(board, depth - 1 - reduction, -alpha - 1, -alpha, new_history, True)
@@ -993,9 +1004,8 @@ def choose_move(board: chess.Board, depth: int = 5) -> chess.Move:
             score, move = pvs_search(board, d, -math.inf, math.inf, position_history)
         else:
             # Aspiration window: narrow search around previous score
-            aspiration_window = 50
-            alpha = prev_score - aspiration_window
-            beta = prev_score + aspiration_window
+            alpha = prev_score - ASPIRATION_WINDOW
+            beta = prev_score + ASPIRATION_WINDOW
             
             score, move = pvs_search(board, d, alpha, beta, position_history)
             
